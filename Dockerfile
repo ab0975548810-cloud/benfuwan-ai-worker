@@ -4,10 +4,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/root/.cache/huggingface \
     TRANSFORMERS_CACHE=/root/.cache/huggingface \
-    MODEL_REPO=ZhengPeng7/BiRefNet \
-    MODEL_SIZE=1024 \
     OUTPAINT_MODEL_REPO=runwayml/stable-diffusion-inpainting \
-    OUTPAINT_MAX_EDGE=1024
+    OUTPAINT_MAX_EDGE=768
 
 WORKDIR /app
 
@@ -16,20 +14,18 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY handler.py /app/handler.py
 
-# Bake both AI models into the image.  This makes the build heavier once, but
-# prevents every scale-to-zero worker from downloading multi-GB weights again.
+# Dedicated generative worker: bake only the inpainting model into this image.
+# This branch is intentionally separate from BiRefNet so normal background
+# removal never waits for a multi-GB diffusion image to start.
 RUN python - <<'PY'
-from transformers import AutoModelForImageSegmentation
 from diffusers import StableDiffusionInpaintPipeline
 import torch
-seg='ZhengPeng7/BiRefNet'
-out='runwayml/stable-diffusion-inpainting'
-AutoModelForImageSegmentation.from_pretrained(seg, trust_remote_code=True)
+repo='runwayml/stable-diffusion-inpainting'
 try:
-    StableDiffusionInpaintPipeline.from_pretrained(out, torch_dtype=torch.float16, variant='fp16')
+    StableDiffusionInpaintPipeline.from_pretrained(repo, torch_dtype=torch.float16, variant='fp16')
 except Exception:
-    StableDiffusionInpaintPipeline.from_pretrained(out, torch_dtype=torch.float16)
-print('BiRefNet + outpaint model cached in image')
+    StableDiffusionInpaintPipeline.from_pretrained(repo, torch_dtype=torch.float16)
+print('Outpaint model cached in image')
 PY
 
 CMD ["python", "-u", "/app/handler.py"]
