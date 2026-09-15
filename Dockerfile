@@ -4,7 +4,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/runpod-volume/huggingface-cache \
     HUGGINGFACE_HUB_CACHE=/runpod-volume/huggingface-cache/hub \
-    OUTPAINT_MODEL_REPO=runwayml/stable-diffusion-inpainting \
+    OUTPAINT_MODEL_REPO=stable-diffusion-v1-5/stable-diffusion-inpainting \
     OUTPAINT_MAX_EDGE=768
 
 WORKDIR /app

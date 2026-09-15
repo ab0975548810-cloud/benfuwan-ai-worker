@@ -9,7 +9,7 @@ import torch
 from PIL import Image, ImageOps, ImageFilter
 from diffusers import StableDiffusionInpaintPipeline
 
-MODEL_REPO = os.environ.get('OUTPAINT_MODEL_REPO', 'runwayml/stable-diffusion-inpainting').strip() or 'runwayml/stable-diffusion-inpainting'
+MODEL_REPO = os.environ.get('OUTPAINT_MODEL_REPO', 'stable-diffusion-v1-5/stable-diffusion-inpainting').strip() or 'stable-diffusion-v1-5/stable-diffusion-inpainting'
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_EDGE = max(512, min(1024, int(os.environ.get('OUTPAINT_MAX_EDGE', '768') or 768)))
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
