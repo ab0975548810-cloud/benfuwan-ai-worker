@@ -2,6 +2,7 @@ import base64
 import io
 import os
 import time
+from pathlib import Path
 
 import runpod
 import torch
@@ -13,16 +14,48 @@ MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_EDGE = max(512, min(1024, int(os.environ.get('OUTPAINT_MAX_EDGE', '768') or 768)))
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 DTYPE = torch.float16 if DEVICE.type == 'cuda' else torch.float32
+HF_CACHE_ROOT = Path('/runpod-volume/huggingface-cache/hub')
 
-print(f'[OUTPAINT] loading model={MODEL_REPO} device={DEVICE} dtype={DTYPE}')
+
+def _cached_model_path(model_id: str):
+    model_dir = HF_CACHE_ROOT / ('models--' + model_id.replace('/', '--'))
+    refs_main = model_dir / 'refs' / 'main'
+    if refs_main.exists():
+        try:
+            revision = refs_main.read_text().strip()
+            snap = model_dir / 'snapshots' / revision
+            if (snap / 'model_index.json').exists():
+                return str(snap)
+        except Exception:
+            pass
+    snaps = model_dir / 'snapshots'
+    if snaps.exists():
+        try:
+            candidates = sorted(
+                [p for p in snaps.iterdir() if p.is_dir() and (p / 'model_index.json').exists()],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                return str(candidates[0])
+        except Exception:
+            pass
+    return None
+
+
+MODEL_SOURCE = _cached_model_path(MODEL_REPO) or MODEL_REPO
+USING_CACHED_MODEL = MODEL_SOURCE != MODEL_REPO
+print(f'[OUTPAINT] loading model={MODEL_REPO} source={MODEL_SOURCE} cached={USING_CACHED_MODEL} device={DEVICE} dtype={DTYPE}')
 _kwargs = {'torch_dtype': DTYPE}
-if DEVICE.type == 'cuda':
+if USING_CACHED_MODEL:
+    _kwargs['local_files_only'] = True
+elif DEVICE.type == 'cuda':
     _kwargs['variant'] = 'fp16'
 try:
-    PIPE = StableDiffusionInpaintPipeline.from_pretrained(MODEL_REPO, **_kwargs)
+    PIPE = StableDiffusionInpaintPipeline.from_pretrained(MODEL_SOURCE, **_kwargs)
 except Exception:
     _kwargs.pop('variant', None)
-    PIPE = StableDiffusionInpaintPipeline.from_pretrained(MODEL_REPO, **_kwargs)
+    PIPE = StableDiffusionInpaintPipeline.from_pretrained(MODEL_SOURCE, **_kwargs)
 PIPE = PIPE.to(DEVICE)
 try:
     PIPE.enable_attention_slicing()
@@ -107,7 +140,6 @@ def _outpaint(image: Image.Image, payload: dict):
     image, nw, nh, x, y = _geometry(image, direction, ratio)
     ow, oh = image.size
 
-    # A blurred cover gives the model compatible colours at the new borders.
     seed_bg = image.resize((nw, nh), Image.Resampling.LANCZOS)
     seed_bg = seed_bg.filter(ImageFilter.GaussianBlur(radius=max(10, min(nw, nh) // 32)))
     canvas = seed_bg.copy()
@@ -151,7 +183,6 @@ def _outpaint(image: Image.Image, payload: dict):
             generator=generator,
         ).images[0]
 
-    # Never regenerate the customer's original centre pixels.
     result.paste(image, (x, y))
     out = io.BytesIO()
     result.save(out, format='PNG', optimize=True, compress_level=5)
@@ -179,6 +210,7 @@ def handler(job):
             'status': 'success',
             'task': 'outpaint',
             'model': MODEL_REPO,
+            'cached_model': USING_CACHED_MODEL,
             'width': width,
             'height': height,
             'execution_ms': elapsed_ms,
